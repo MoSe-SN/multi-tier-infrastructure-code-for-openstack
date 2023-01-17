@@ -1,0 +1,589 @@
+heat_template_version: 2021-04-16
+
+description: >
+  Heat Template to make a multi-tier topology infrastructure.
+
+parameters:
+
+  external_network_pool:
+    type: json
+    description: >
+      Various information about the external network that will act
+      as an interface between Openstack resources and internet.
+    default: {
+      "network_name": "external-network",
+      "network_type": "flat",
+      "physical_network": "physnet1",
+      "subnet_name": "external-subnet",
+      "subnet_cidr": "9.12.93.0/24",
+      "gateway_ip": "9.12.93.1",
+      "enable_dhcp": false,
+      "allocation_pools": [
+        {
+          "start": "9.12.93.100",
+          "end": "9.12.93.199"
+        }
+      ]
+    }
+
+  image_info:
+  type: json
+  description: Nothing.
+  default: {
+    "name": "racheros",
+    "container_format": "bare",
+    "disk_format": "qcow2",
+    "location": "https://github.com/rancher/os/releases/download/v1.5.8/rancheros-openstack.img"
+  }
+
+  nameservers:
+    type: comma_delimited_list
+    description: List of the DNS servers.
+    default: ["8.8.8.8","8.8.8.4"]
+
+  admserv_flavor:
+    type: json
+    description: Nothing.
+    default: {
+      "name": "t1.adm",
+      "ram": 1024,
+      "vcpus": 2,
+      "disk": 10
+    }
+
+  dbserv_flavor:
+    type: json
+    description: Nothing.
+    default: {
+      "name": "t1.db",
+      "ram": 1024,
+      "vcpus": 1,
+      "disk": 10
+    }
+
+  appserv_flavor:
+    type: json
+    description: Nothing.
+    default: {
+      "name": "t1.app",
+      "ram": 1024,
+      "vcpus": 1,
+      "disk": 10
+    }
+
+  admin_network:
+    type: json
+    description: Nothing.
+    default: {
+      "subnet_name": "adm-subnet",
+      "cidr": "172.16.1.0/24",
+      "gateway_ip": "172.16.1.1",
+      "adm_ip": "172.16.1.2",
+      "adm_fip": "9.12.93.101"
+    }
+
+  database_network:
+    type: json
+    description: Nothing.
+    default: {
+      "subnet_name": "db-subnet",
+      "cidr": "192.168.1.0/24",
+      "gateway_ip": "192.168.1.1",
+      "db_ip_1": "192.168.1.2",
+      "db_ip_2": "192.168.1.3"
+    }
+
+  application_network:
+    type: json
+    description: Nothing.
+    default: {
+      "subnet_name": "app-subnet",
+      "cidr": "10.50.1.0/24",
+      "gateway_ip": "10.50.1.1",
+      "app_ip_1": "10.50.1.2",
+      "app_fip_1": "9.12.93.102",
+      "app_ip_2": "10.50.1.3",
+      "app_fip_2": "9.12.93.103"
+    }
+
+  router_generic_name:
+    type: string
+    description: Nothing.
+    default: "router-generic"
+
+  user_data_script:
+    type: string
+    description: A simple script to deploy an apache2 web server
+    default: |
+      #!/bin/bash
+      # update package list
+      apt update
+      # install apache2
+      apt install -y apache2
+      # start service apache2
+      systemctl start apache2
+      # enable service apache2
+      systemctl enable apache2
+
+
+resources:
+  # declaration of template resources
+
+  # Flavors
+  admin_flavor:
+    type: OS::Nova::Flavor
+    description: Nothing.
+    properties:
+      name: { get_param: [ admserv_flavor, name ] }
+      ram: { get_param: [ admserv_flavor, ram ] }
+      vcpus: { get_param: [ admserv_flavor, vcpus ] }
+      disk: { get_param: [ admserv_flavor, disk ] }
+
+  application_flavor:
+    type: OS::Nova::Flavor
+    description: Nothing.
+    properties:
+      name: { get_param: [ appserv_flavor, name ] }
+      ram: { get_param: [ appserv_flavor, ram ] }
+      vcpus: { get_param: [ appserv_flavor, vcpus ] }
+      disk: { get_param: [ appserv_flavor, disk ] }
+
+  database_flavor:
+    type: OS::Nova::Flavor
+    description: Nothing.
+    properties:
+      name: { get_param: [ admserv_flavor, name ] }
+      ram: { get_param: [ admserv_flavor, ram ] }
+      vcpus: { get_param: [ admserv_flavor, vcpus ] }
+      disk: { get_param: [ admserv_flavor, disk ] }
+
+  external_network:
+    type: OS::Neutron::ProviderNet
+    description: Nothing.
+    properties:
+      name: { get_param: [ external_network_pool, name ] }
+      network_type: { get_param: [ external_network_pool, network_type ] }
+      physical_network: { get_param: [ external_network_pool, physical_network ] }
+
+  external_subnet:
+    type: OS::Neutron::Subnet
+    description: Nothing.
+    properties:
+      name: { get_param: [ external_network_pool, subnet_name ] }
+      network: { get_resource: external_network }
+      cidr: { get_param: [ external_network_pool, subnet_cidr ] }
+      dns_nameservers: { get_param: nameservers }
+      enable_dhcp: { get_param: [ external_network_pool, enable_dhcp ] }
+      gateway_ip: { get_param: [ external_network_pool, gateway_ip ] }
+      allocation_pools: { get_param: [ external_network_pool, allocation_pools ] }
+
+  router_generic:
+    type: OS::Neutron::Router
+    description: Nothing.
+    properties:
+      name: { get_param: router_generic_name }
+      external_gateway_info:
+        network: { get_resource: external_network }
+      admin_state_up: true
+
+  adm_network:
+    type: OS::Neutron::Net
+    description: Nothing.
+    properties:
+      name: "adm-net"
+
+  app_network:
+    type: OS::Neutron::Net
+    description: Nothing.
+    properties:
+      name: "app-net"
+
+  db_network:
+    type: OS::Neutron::Net
+    description: Nothing.
+    properties:
+      name: "db-net"
+
+  adm_subnet:
+    type: OS::Neutron::Subnet
+    description: Nothing.
+    properties:
+      name: { get_param: [ admin_network, subnet_name ] }
+      network: { get_resource: adm_network }
+      cidr: { get_param: [ admin_network, cidr ] }
+      dns_nameservers: { get_param: nameservers}
+      enable_dhcp: false
+      gateway_ip: { get_param: [ admin_network, gateway_ip ] }
+      ip_version: 4
+
+  app_subnet:
+    type: OS::Neutron::Subnet
+    description: Nothing.
+    properties:
+      name: { get_param: [ application_network, subnet_name ] }
+      network: { get_resource: app_network }
+      cidr: { get_param: [ application_network, cidr ] }
+      dns_nameservers: { get_param: nameservers }
+      enable_dhcp: false
+      gateway_ip: { get_param: [ application_network, gateway_ip ] }
+      ip_version: 4
+
+  db_subnet:
+    type: OS::Neutron::Subnet
+    description: Nothing.
+    properties:
+      name: { get_param: [ database_network, subnet_name ] }
+      network: { get_resource: db_network }
+      cidr: { get_param: [ database_network, cidr ] }
+      dns_nameservers: { get_param: nameservers }
+      enable_dhcp: false
+      gateway_ip: { get_param: [ database_network, gateway_ip ] }
+      ip_version: 4
+
+  adm_interface:
+    type: OS::Neutron::RouterInterface
+    description: Nothing.
+    properties:
+      router: { get_resource: router_generic }
+      subnet: { get_resource: adm_subnet }
+
+  app_interface:
+    type: OS::Neutron::RouterInterface
+    description: Nothing.
+    properties:
+      router: { get_resource: router_generic }
+      subnet: { get_resource: app_subnet }
+
+  db_interface:
+    type: OS::Neutron::RouterInterface
+    description: Nothing.
+    properties:
+      router: { get_resource: router_generic }
+      subnet: { get_resource: db_subnet }
+
+  adm_secgroup:
+    type: OS::Neutron::SecurityGroup
+    description: Nothing.
+    properties:
+      name: "admin-secgroup"
+      rules:
+        - direction: "egress"
+          ethertype: "IPv4"
+          port_range_min: 1
+          port_range_max: 65535
+          protocol: "tcp"
+          remote_ip_prefix: "0.0.0.0/0"
+        - direction: "egress"
+          ethertype: "IPv4"
+          port_range_min: 1
+          port_range_max: 65535
+          protocol: "udp"
+          remote_ip_prefix: "0.0.0.0/0"
+        - direction: "egress"
+          ethertype: "IPv4"
+          protocol: "icmp"
+          remote_ip_prefix: "0.0.0.0/0"
+        - direction: "ingress"
+          ethertype: "IPv4"
+          port_range_min: 22
+          port_range_max: 22
+          protocol: "tcp"
+          remote_ip_prefix: "0.0.0.0/0"
+
+  app_secgroup:
+    type: OS::Neutron::SecurityGroup
+    description: Nothing.
+    properties:
+      name: "application-secgroup"
+      rules:
+        - direction: "egress"
+          ethertype: "IPv4"
+          port_range_min: 1
+          port_range_max: 65535
+          protocol: "tcp"
+          remote_ip_prefix: "0.0.0.0/0"
+        - direction: "egress"
+          ethertype: "IPv4"
+          port_range_min: 1
+          port_range_max: 65535
+          protocol: "udp"
+          remote_ip_prefix: "0.0.0.0/0"
+        - direction: "egress"
+          ethertype: "IPv4"
+          protocol: "icmp"
+          remote_ip_prefix: "0.0.0.0/0"
+        - direction: "ingress"
+          ethertype: "IPv4"
+          port_range_min: 1
+          port_range_max: 65535
+          protocol: "tcp"
+          remote_ip_prefix: "172.16.1.0/24"
+        - direction: "ingress"
+          ethertype: "IPv4"
+          port_range_min: 1
+          port_range_max: 65535
+          protocol: "udp"
+          remote_ip_prefix: "172.16.1.0/24"
+        - direction: "ingress"
+          ethertype: "IPv4"
+          protocol: "icmp"
+          remote_ip_prefix: "172.16.1.0/24"
+        - direction: "ingress"
+          ethertype: "IPv4"
+          port_range_min: 80
+          port_range_max: 80
+          protocol: "tcp"
+          remote_ip_prefix: "0.0.0.0/0"
+        - direction: "ingress"
+          ethertype: "IPv4"
+          port_range_min: 443
+          port_range_max: 443
+          protocol: "tcp"
+          remote_ip_prefix: "0.0.0.0/0"
+
+  db_secgroup:
+    type: OS::Neutron::SecurityGroup
+    description: Nothing.
+    properties:
+      name: "database-secgroup"
+      rules:
+        - direction: "egress"
+          ethertype: "IPv4"
+          port_range_min: 1
+          port_range_max: 65535
+          protocol: "tcp"
+          remote_ip_prefix: "0.0.0.0/0"
+        - direction: "egress"
+          ethertype: "IPv4"
+          port_range_min: 1
+          port_range_max: 65535
+          protocol: "udp"
+          remote_ip_prefix: "0.0.0.0/0"
+        - direction: "egress"
+          ethertype: "IPv4"
+          protocol: "icmp"
+          remote_ip_prefix: "0.0.0.0/0"
+        - direction: "ingress"
+          ethertype: "IPv4"
+          port_range_min: 1
+          port_range_max: 65535
+          protocol: "tcp"
+          remote_ip_prefix: "172.16.1.0/24"
+        - direction: "ingress"
+          ethertype: "IPv4"
+          port_range_min: 1
+          port_range_max: 65535
+          protocol: "udp"
+          remote_ip_prefix: "172.16.1.0/24"
+        - direction: "ingress"
+          ethertype: "IPv4"
+          protocol: "icmp"
+          remote_ip_prefix: "172.16.1.0/24"
+        - direction: "ingress"
+          ethertype: "IPv4"
+          port_range_min: 1521
+          port_range_max: 1521
+          protocol: "tcp"
+          remote_ip_prefix: "10.50.1.0/24"
+
+  adm_port:
+    type: OS::Neutron::Port
+    description: Nothing.
+    properties:
+      name: "adm-port"
+      network: { get_resource: adm_network }
+      security_groups: [ { get_resource: adm_secgroup } ]
+      fixed_ips:
+        - subnet_id: { get_resource: adm_subnet }
+          address: { get_param: [ admin_network, adm_ip ] }
+
+  app_port_1:
+    type: OS::Neutron::Port
+    description: Nothing.
+    properties:
+      name: "app-port-1"
+      network: { get_resource: app_network }
+      security_groups: [ { get_resource: app_secgroup } ]
+      fixed_ips:
+        - subnet_id: { get_resource: app_subnet }
+          address: { get_param: [ application_network, app_ip_1 ] }
+
+  app_port_2:
+    type: OS::Neutron::Port
+    description: Nothing.
+    properties:
+      name: "app-port-2"
+      network: { get_resource: app_network }
+      security_groups: [ { get_resource: app_secgroup } ]
+      fixed_ips:
+        - subnet_id: { get_resource: app_subnet }
+          address: { get_param: [ application_network, app_ip_2 ] }
+
+  db_port_1:
+    type: OS::Neutron::Port
+    description: Nothing.
+    properties:
+      name: "db-port-1"
+      network: { get_resource: db_network }
+      security_groups: [ { get_resource: db_secgroup } ]
+      fixed_ips:
+        - subnet_id: { get_resource: db_subnet }
+          address: { get_param: [ database_network, db_ip_1 ] }
+
+  db_port_2:
+    type: OS::Neutron::Port
+    description: Nothing.
+    properties:
+      name: "db-port-2"
+      network: { get_resource: db_network }
+      security_groups: [ { get_resource: db_secgroup } ]
+      fixed_ips:
+        - subnet_id: { get_resource: db_subnet }
+          address: { get_param: [ database_network, db_ip_2 ] }
+
+  vm_image:
+    type: OS::Glance::WebImage
+    description: Nothing.
+    properties:
+      name: { get_param: [ image_info, name ] }
+      container_format: { get_param: [ image_info, container_format ] }
+      disk_format: { get_param: [ image_info, disk_format ] }
+      location: { get_param: [ image_info, location ] }
+
+  admin_keypair:
+    type: OS::Nova::KeyPair
+    description: Nothing.
+    properties:
+      name: "adm-keypair"
+      save_private_key: true
+
+  application_keypair_1:
+    type: OS::Nova::KeyPair
+    description: Nothing.
+    properties:
+      name: "app-keypair-1"
+      save_private_key: true
+
+  application_keypair_2:
+    type: OS::Nova::KeyPair
+    description: Nothing.
+    properties:
+      name: "app-keypair-2"
+      save_private_key: true
+
+  database_keypair_1:
+    type: OS::Nova::KeyPair
+    description: Nothing.
+    properties:
+      name: "db-keypair-1"
+      save_private_key: true
+
+  database_keypair_2:
+    type: OS::Nova::KeyPair
+    description: Nothing.
+    properties:
+      name: "db-keypair-2"
+      save_private_key: true
+
+  admin_instance:
+    type: OS::Nova::Server
+    description: Nothing.
+    properties:
+      name: "adm-ins"
+      networks:
+        - port: { get_resource: adm_port }
+      image: { get_resource: vm_image }
+      flavor: { get_resource: admin_flavor }
+      key_name: { get_resource: admin_keypair }
+
+  application_instance_1:
+    type: OS::Nova::Server
+    description: Nothing.
+    properties:
+      name: "app-ins-1"
+      networks:
+        - port: { get_resource: app_port_1 }
+      image: { get_resource: vm_image }
+      flavor: { get_resource: application_flavor }
+      key_name: { get_resource: application_keypair_1 }
+      user_data: { get_param: user_data_script }
+
+  application_instance_2:
+    type: OS::Nova::Server
+    description: Nothing.
+    properties:
+      name: "app-ins-2"
+      networks:
+        - port: { get_resource: app_port_2 }
+      image: { get_resource: vm_image }
+      flavor: { get_resource: application_flavor }
+      key_name: { get_resource: application_keypair_2 }
+      user_data: { get_param: user_data_script }
+
+  database_instance_1:
+    type: OS::Nova::Server
+    description: Nothing.
+    properties:
+      name: "db-ins"
+      networks:
+        - port: { get_resource: db_port_1 }
+      image: { get_resource: vm_image }
+      flavor: { get_resource: database_flavor }
+      key_name: { get_resource: database_keypair_1 }
+
+  database_instance_2:
+    type: OS::Nova::Server
+    description: Nothing.
+    properties:
+      name: "adm-ins"
+      networks:
+        - port: { get_resource: db_port_2 }
+      image: { get_resource: vm_image }
+      flavor: { get_resource: database_flavor }
+      key_name: { get_resource: database_keypair_2 }
+
+  admin_floatingip:
+    type: OS::Neutron::FloatingIP
+    description: Nothing.
+    properties:
+      floating_network: { get_resource: external_network }
+      floating_ip_address: { get_param: [ admin_network, adm_fip ] }
+      port_id: { get_resource: adm_port }
+
+  application_floatingip_1:
+    type: OS::Neutron::FloatingIP
+    description: Nothing.
+    properties:
+      floating_network: { get_resource: external_network }
+      floating_ip_address: { get_param: [ application_network, app_fip_1 ] }
+      port_id: { get_resource: app_port_1 }
+
+  application_floatingip_2:
+    type: OS::Neutron::FloatingIP
+    description: Nothing.
+    properties:
+      floating_network: { get_resource: external_network }
+      floating_ip_address: { get_param: [ application_network, app_fip_2 ] }
+      port_id: { get_resource: app_port_2 }
+
+outputs:
+  # declaration of output parameters
+  adm_private_key:
+    description: "Admin private key"
+    value: { get_attr: [ admin_keypair, private_key ] }
+
+  app_private_key_1:
+    description: "Application private key"
+    value: { get_attr: [ application_keypair_1, private_key ] }
+
+  app_private_key_2:
+    description: "Application private key"
+    value: { get_attr: [ application_keypair_2, private_key ] }
+
+  db_private_key_1:
+    description: "Database private key"
+    value: { get_attr: [ database_keypair_1, private_key ] }
+
+  db_private_key_2:
+    description: "Database private key"
+    value: { get_attr: [ database_keypair_2, private_key ] }
